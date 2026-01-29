@@ -12,12 +12,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Fix Permissions
-        run: |
-          # The Docker container runs as root, but buildozer shouldn't.
-          # We ensure the workspace is owned by the buildozer user.
-          chown -R $USER:$USER .
-
       - name: Build APK
         shell: bash
         run: |
