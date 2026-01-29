@@ -23,8 +23,8 @@ jobs:
     - name: Build APK
       run: |
         export PATH=$PATH:~/.local/bin
-        MAX = 5
-        COUNT = 0
+        MAX=5
+        COUNT=0
         SUCCESS=false
         while [ $COUNT -lt $MAX ]; do
           buildozer -v android debug && SUCCESS=true && break
