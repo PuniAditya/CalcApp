@@ -1,41 +1,48 @@
-name: Build Kivy APK
-on: [push, pull_request]
+name: Build Android APK
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    # Using the official Buildozer Docker image eliminates local macro errors
-    container:
-      image: kivy/buildozer:latest
+    runs-on: ubuntu-22.04 # 22.04 is more stable for the Android NDK toolchain
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Build APK
-        shell: bash
+      - name: Install System Dependencies
         run: |
-          # Use the 'user' account inside the container to run the build
-          su user -c "
-          export PATH=\$PATH:/home/user/.local/bin
+          sudo apt update
+          sudo apt install -y \
+            git zip unzip autoconf automake libtool pkg-config zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev \
+            python3-pip python3-setuptools python3-dev
           
-          # 1. First run to trigger SDK/NDK downloads
-          buildozer -v android debug || true
-          
-          # 2. Apply your AIDL fix inside the container
-          echo 'Applying AIDL fix...'
-          SYSTEM_AIDL=\$(which aidl)
-          SDK_DIR=\$(find . -name 'build-tools' -type d -path '*/android-sdk/*' | head -n 1)
-          
-          if [ -n \"\$SDK_DIR\" ]; then
-            VERSION_FOLDER=\$(ls -1 \"\$SDK_DIR\" | head -n 1)
-            TARGET_PATH=\"\$SDK_DIR/\$VERSION_FOLDER\"
-            ln -sf \"\$SYSTEM_AIDL\" \"\$TARGET_PATH/aidl\"
-          fi
-          
-          # 3. Final Build
-          buildozer -v android debug
-          "
+          # CRITICAL: Fix for the LT_INIT / libtool macro errors
+          export ACLOCAL_PATH=/usr/share/aclocal
+          sudo ln -s /usr/share/aclocal /usr/local/share/aclocal || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Buildozer and Cython
+        run: |
+          # Cython 0.29.33 is the gold standard for Kivy 2.3.0 builds
+          pip install --user --upgrade buildozer "cython<3.0.0" virtualenv
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build APK (Verbose Mode)
+        run: |
+          # The "yes |" auto-accepts Android SDK licenses (fixes the AIDL error)
+          export ACLOCAL_PATH=/usr/share/aclocal
+          yes | buildozer -v android debug
+        env:
+          # This helps Buildozer find the correct paths in CI
+          USER: runner
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
