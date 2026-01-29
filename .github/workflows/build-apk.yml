@@ -1,0 +1,33 @@
+name: Build APK
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Install requirements
+      run: |
+        sudo apt update
+        sudo apt install -y python3 python3-pip git zip unzip openjdk-17-jdk libffi-dev libssl-dev libjpeg-dev zlib1g-dev
+
+    - name: Install buildozer
+      run: |
+        pip3 install --user buildozer cython
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Build APK
+      run: |
+        buildozer -v android debug
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: calc-app
+        path: bin/*.apk
