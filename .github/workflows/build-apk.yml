@@ -4,59 +4,44 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Using the official Buildozer Docker image eliminates local macro errors
+    container:
+      image: kivy/buildozer:latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install System Dependencies
+      - name: Fix Permissions
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential git ffmpeg libsdl2-dev libsdl2-image-dev \
-            libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev \
-            libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev \
-            openjdk-17-jdk unzip zip ccache autoconf libtool pkg-config \
-            libncurses5-dev libstdc++6 libtinfo6 cmake libffi-dev libssl-dev \
-            automake libtool-bin m4
+          # The Docker container runs as root, but buildozer shouldn't.
+          # We ensure the workspace is owned by the buildozer user.
+          chown -R user:user .
 
-      - name: Install Buildozer and Cython
-        run: |
-          pip install --user --upgrade buildozer cython==0.29.33 virtualenv
-
-      - name: Build APK with Fixes
+      - name: Build APK
         shell: bash
         run: |
-          export PATH=$PATH:~/.local/bin
+          # Use the 'user' account inside the container to run the build
+          su user -c "
+          export PATH=\$PATH:/home/user/.local/bin
           
-          # 1. Start buildozer to trigger SDK download
-          # We expect this to fail or pause, so we run it briefly
-          echo "Initializing Buildozer environment..."
+          # 1. First run to trigger SDK/NDK downloads
           buildozer -v android debug || true
           
-          # 2. Apply the AIDL fix dynamically
-          echo "Applying the AIDL symlink fix..."
-          SYSTEM_AIDL=$(which aidl)
-          # Search for the build-tools folder in the local or home .buildozer directory
-          SDK_DIR=$(find . -name "build-tools" -type d -path "*/android-sdk/*" | head -n 1)
-          if [ -z "$SDK_DIR" ]; then
-             SDK_DIR=$(find $HOME -name "build-tools" -type d -path "*/android-sdk/*" | head -n 1)
+          # 2. Apply your AIDL fix inside the container
+          echo 'Applying AIDL fix...'
+          SYSTEM_AIDL=\$(which aidl)
+          SDK_DIR=\$(find . -name 'build-tools' -type d -path '*/android-sdk/*' | head -n 1)
+          
+          if [ -n \"\$SDK_DIR\" ]; then
+            VERSION_FOLDER=\$(ls -1 \"\$SDK_DIR\" | head -n 1)
+            TARGET_PATH=\"\$SDK_DIR/\$VERSION_FOLDER\"
+            ln -sf \"\$SYSTEM_AIDL\" \"\$TARGET_PATH/aidl\"
           fi
-
-          if [ -n "$SDK_DIR" ]; then
-            VERSION_FOLDER=$(ls -1 "$SDK_DIR" | head -n 1)
-            TARGET_PATH="$SDK_DIR/$VERSION_FOLDER"
-            echo "Linking $SYSTEM_AIDL to $TARGET_PATH/aidl"
-            ln -sf "$SYSTEM_AIDL" "$TARGET_PATH/aidl"
-          fi
-
-          # 3. The Final Build
-          echo "Starting final build attempt..."
+          
+          # 3. Final Build
           buildozer -v android debug
+          "
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
