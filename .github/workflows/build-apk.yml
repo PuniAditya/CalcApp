@@ -1,45 +1,65 @@
 name: Build Kivy APK
-
-on:
-  push:
-    branches: ["main"]
+on: [push, pull_request]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Install requirements
-      run: |
-        sudo apt update
-        sudo apt install -y build-essential git ffmpeg libsdl2-dev libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev \
-        python3  python3-dev python3-pip  zip unzip libffi-dev libssl-dev libjpeg-dev libtool pkg-config \
-        openjdk-17-jdk libncurses5-dev libncursesw5-dev libtinfo6 cmake autoconf automake zlib1g-dev
-        pip3 install --upgrade buildozer cython==0.29.34
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Build APK
-      run: |
-        export PATH=$PATH:~/.local/bin
-        MAX=5
-        COUNT=0
-        SUCCESS=false
-        while [ $COUNT -lt $MAX ]; do
-          buildozer -v android debug && SUCCESS=true && break
-          AIDL_PATH=$(which aidl)
-          SDK_BUILD=$(find .buildozer/android/platforms/ -name "build-tools" -type d 2>/dev/null | head -n 1)
-          if [ -n "$SDK_BUILD" ]; then
-            VERSION=$(ls $SDK_BUILD | head -n 1)
-            TARGET="$SDK_BUILD/$VERSION"
-            ln -sf $AIDL_PATH "$TARGET/aidl"
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential git ffmpeg libsdl2-dev libsdl2-image-dev \
+            libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev \
+            libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev \
+            openjdk-17-jdk unzip zip ccache autoconf libtool pkg-config \
+            libncurses5 libstdc++6 libtinfo5 cmake libffi-dev libssl-dev \
+            automake libtool-bin m4
+
+      - name: Install Buildozer and Cython
+        run: |
+          pip install --user --upgrade buildozer cython==0.29.33 virtualenv
+
+      - name: Build APK with Fixes
+        shell: bash
+        run: |
+          export PATH=$PATH:~/.local/bin
+          
+          # 1. Start buildozer to trigger SDK download
+          # We expect this to fail or pause, so we run it briefly
+          echo "Initializing Buildozer environment..."
+          buildozer -v android debug || true
+          
+          # 2. Apply the AIDL fix dynamically
+          echo "Applying the AIDL symlink fix..."
+          SYSTEM_AIDL=$(which aidl)
+          # Search for the build-tools folder in the local or home .buildozer directory
+          SDK_DIR=$(find . -name "build-tools" -type d -path "*/android-sdk/*" | head -n 1)
+          if [ -z "$SDK_DIR" ]; then
+             SDK_DIR=$(find $HOME -name "build-tools" -type d -path "*/android-sdk/*" | head -n 1)
           fi
-          COUNT=$((COUNT+1))
-        done
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: calc-app
-        path: bin/*.apk
+          if [ -n "$SDK_DIR" ]; then
+            VERSION_FOLDER=$(ls -1 "$SDK_DIR" | head -n 1)
+            TARGET_PATH="$SDK_DIR/$VERSION_FOLDER"
+            echo "Linking $SYSTEM_AIDL to $TARGET_PATH/aidl"
+            ln -sf "$SYSTEM_AIDL" "$TARGET_PATH/aidl"
+          fi
+
+          # 3. The Final Build
+          echo "Starting final build attempt..."
+          buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: bin/*.apk
