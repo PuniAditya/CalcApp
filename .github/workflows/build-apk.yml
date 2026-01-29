@@ -16,7 +16,7 @@ jobs:
         run: |
           # The Docker container runs as root, but buildozer shouldn't.
           # We ensure the workspace is owned by the buildozer user.
-          chown -R user:user .
+          chown -R $USER:$USER .
 
       - name: Build APK
         shell: bash
